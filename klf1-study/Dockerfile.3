@@ -1,0 +1,9 @@
+FROM tms
+RUN mkdir /home/rstudio/components
+RUN mkdir /home/rstudio/code
+RUN mkdir /home/rstudio/data
+WORKDIR /home/rstudio
+RUN apt update
+COPY components/* /tmp
+RUN R -f /tmp/installPackagesForTrena.R
+

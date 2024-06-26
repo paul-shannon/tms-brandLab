@@ -1,0 +1,213 @@
+---
+title: "KLF1 regulation"
+author: "Paul Shannon"
+date: "2024-06-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### An introduction to trena and the FeatureTable
+
+
+We begin by loading the trena and ghdb (GeneHancerDatabase) packages, and
+all of their dependencies.  ghdb will play only a small role here.
+
+```{r libraries, echo=FALSE}
+suppressWarnings(
+  suppressMessages({
+     library(trena)
+     library(ghdb)
+     }))
+```
+Some initializations.  The tersely named "ft" ("feature table") is the data
+structure we fill with all the relevant data we can muster
+
+```{r initialize}
+targetGene <- "KLF1"   # coded on the reverse strand
+tss <- 12887201        #  chr19:12,887,201
+ft <- FeatureTable$new(target.gene=targetGene, reference.genome="hg38")
+```
+We use FIMO to pre-calculate transcription factor motif matches to a 500k genomic
+region around KLF1's transcription start site.   This is probably excessive. In this example we only use a 20k region.  Instructions for creating a FIMO table for other genes will be covered at a later date.
+We add an extra column to the table, the **tssDistance**
+```{r fimo}
+
+tbl.fimo <- get(load("/home/rstudio/data/tbl.fimo.KLF1.chr19:12637201-13137201.RData"))
+dim(tbl.fimo)
+tbl.fimo$tssDistance <- tbl.fimo$end - tss  # upstream is positive
+dim(tbl.fimo)
+```
+
+These 1.576 million FIMO hits across 500k define the <i>possible</i> transcription
+factor binding sites.   We use them to intialize our feature table.  Subsequent 
+data, added below, annotate many of these region, eventually creating a rich enough
+feature table to query for interesting TFBS/targetGene candidates.
+
+```{r setFundamentalRegions}
+ft$setFundamentalRegions(tbl.fimo)
+dim(ft$getTable()) 
+```
+Now we query GeneHancer, where enhancer and promoter regions are classified by the
+tissue type in which they were reported.   We want to query only those tissues which 
+are related to erythropoiesis.  Only 3 regions are returned.
+
+```{r ghdb}
+gh <- GeneHancerDB(host="ghdb", port=5432)
+allTissues <- listTissues(gh, "KLF1")
+tissues <-   c(grep("myeloid", allTissues, ignore.case=TRUE, v=TRUE),
+               grep("eryth",   allTissues, ignore.case=TRUE, v=TRUE),
+               grep("blood",   allTissues, ignore.case=TRUE, v=TRUE))
+tbl.gh <- retrieveEnhancersFromDatabase(gh, "KLF1", tissues)
+  # combined score has too much spread: 12 - 253.  compress
+tbl.gh$combinedscore <- log2(tbl.gh$combinedscore)
+dim(tbl.gh)
+```
+Here is our first instance of adding new data, from an arbitrary source, to the
+feature table ("ft").  We can add a new feature by region, or by gene (i.e., a 
+transcription factor gene, where each TF is associated with a FIMO hit.).  In this
+case we add the GeneHancer combinedscore (for a promoter or enhancer) to all of
+the FIMO-identified regions spanned by the enhancer/promoter region.  
+
+Notice that a new column is added to the feature table, "gh", which contains
+the tbl.gh "combinedscore" values.
+
+```{r ghdbft}
+feature.guide <- list(gh="combinedscore")
+default.values <- list(gh=0)
+ft$addRegionFeature(tbl.gh, feature.genome="hg38", feature.guide, default.values)
+tbl <- ft$getTable()
+dim(tbl)
+colnames(tbl)
+```
+Next we read in rna-seq expression data from the Brand Lab.
+```{r rna-seq}
+mtx <- get(load("/home/rstudio/data/brandLabDifferentiationTimeCourse-27171x28-namesCorrected.RData"))
+dim(mtx)
+```
+We check the range of values recorded across the 28 measurements:
+```{r rna5num}
+fivenum(mtx["KLF1",])
+```
+Find the intersection of FIMO-identified transcription factors, and the
+rna-seq assayed genes.  These will be the candidate regulators considered
+by trena in the next code block after this one.
+```{r candidates}
+candidateTFs <- sort(unique(intersect(tbl.fimo$tf, rownames(mtx))))
+length(candidateTFs)
+deleters <- grep("^KLF1$", candidateTFs)
+if(length(deleters) > 0)
+    candidateTFs <- candidateTFs[-deleters]
+length(candidateTFs)
+```
+Run trena, requesting six algorithms.  Each has a different strength, each
+predicts gene regulators for KLF1
+
+```{r trena}
+solver <- EnsembleSolver(mtx,
+                         targetGene=targetGene,
+                         candidateRegulators=candidateTFs,
+                         solverNames=c("lasso", "Ridge", "Spearman", "Pearson", "RandomForest", "xgboost"),
+                         geneCutoff=1.0)
+tbl.out <- suppressWarnings(run(solver))
+new.order <- order(abs(tbl.out$spearmanCoeff), decreasing=TRUE)
+tbl.out <- tbl.out[new.order,]
+head(tbl.out)
+dim(tbl.out)
+```
+Add our historically preferred trena scores to the feature table.
+```{r addScores}
+ft$addGeneFeature(tbl.out[, c("gene", "rfScore")],
+                  feature.name="rfScore", default.value=0)
+ft$addGeneFeature(tbl.out[, c("gene", "spearmanCoeff")],
+                  feature.name="spearmanCoeff", default.value=0)
+ft$addGeneFeature(tbl.out[, c("gene", "xgboost")],
+                  feature.name="xgboost", default.value=0)
+ft$addGeneFeature(tbl.out[, c("gene", "betaLasso")],
+                  feature.name="lasso", default.value=0)
+```
+Add Brand lab atac-seq.  Take a quick look at the current state of the feature table.
+```{r atac}
+tbl.atac <- get(load("/home/rstudio/data/tbl.atacMerged.RData"))
+dim(tbl.atac)
+head(tbl.atac)
+
+feature.guide <- list(atac="width")
+default.values <- list(atac=0)
+ft$addRegionFeature(tbl.atac, feature.genome="hg38", feature.guide, default.values)
+tbl <- ft$getTable()
+colnames(tbl)
+```
+We now have a fairly rich feature table.  For every TF motif matched region, we 
+have these features:
+   - fimo motif match score
+   - the associated TF gene name
+   - distance to TSS
+   - GeneHancer promoters or enhancers
+   - erythropoiesis ATAC-seq
+   - six trena expression/regression scores, of which we will use four
+This sets us up to explore for TF/targetGene relations of interest.  
+Keep in mind that our exploration will produce only interesting TFs
+and binding sites, each requiring more higly resolved data and experiment to
+validate.  
+
+```{r trenaQueries}
+tssThreshold <- 10000
+tbl.strong.rf <- subset(tbl, atac > 0 & rfScore > 0.5 & abs(tssDistance) < tssThreshold & gh > 0)
+dim(tbl.strong.rf)
+sort(table(tbl.strong.rf$tf), decreasing=TRUE)
+
+tbl.strong.lasso <- subset(tbl, atac > 0 & lasso > 0.1 & abs(tssDistance) < tssThreshold & gh > 0)
+dim(tbl.strong.lasso)
+sort(table(tbl.strong.lasso$tf), decreasing=TRUE)
+
+tbl.strong.boost <- subset(tbl, atac > 0 & xgboost > 0.1 & abs(tssDistance) < tssThreshold & gh > 0)
+dim(tbl.strong.boost)
+sort(table(tbl.strong.boost$tf))
+```
+We filter by spearman correlation last.  The results are usually less interesting
+than those above, since spearman correlatin selects co-expressed genes,
+typically a large group, filtering without the finesse of lasso, random forest or boost.
+```{r spearman}
+tbl.strong.spearman <- subset(tbl, atac > 0 & abs(spearmanCoeff) > 0.92 & gh > 0 &
+                                abs(tssDistance) < tssThreshold)
+sort(table(tbl.strong.spearman$tf))
+```
+Combine the boost, lasso, rf and results, then compare to sperman.
+```{r combine}
+tbl.c <- rbind(tbl.strong.rf, tbl.strong.lasso, tbl.strong.boost)
+dim(tbl.c)
+tbl.c <- unique(tbl.c)
+dim(tbl.c)
+new.order <- order(tbl.c$start)
+tbl.c <- tbl.c[new.order,]
+tf.tab <- sort(table(tbl.c$tf), decreasing=TRUE)
+print(tf.tab)
+tfs.c <- names(tf.tab)
+tfs.spearman <- unique(tbl.strong.spearman$tf)
+```
+TFs combined (w/o Spearman)
+```{r combinedNoSpearman}
+tfs.c
+```
+TFs shared across all groups
+```{r shared}
+intersect(tfs.c, tfs.spearman)
+```
+Spearman Only
+```{r spearmanOnly}
+setdiff(tfs.spearman, tfs.c)
+```
+
+These groups of TFs have emerged as plausible candidates for
+further investigation.  
+
+These results will be much improved, and tied to specific stages in 
+erythropoiesis, by the addition of (among others) single cell data, chromosome 
+conformation, methylation, and proteomics.
+
+
+
+

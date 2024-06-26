@@ -1,0 +1,34 @@
+services:
+  tms:
+    image: "pshannon/tmsft"
+    ports:
+      - "8889:8787"
+      - "15000-15010:15000-15010"
+    environment:
+       PASSWORD: password
+       DISABLE_AUTH: true
+    volumes:
+       - tms_localData:/home/rstudio/localData
+       - tms_localCode:/home/rstudio/localCode
+  ghdb:
+    image: "pshannon/ghdb"
+    environment:
+      POSTGRES_PASSWORD: trena
+      PGDATA: /var/lib/postgresql/data/pgdata
+volumes:
+  tms_localData:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: /Users/paul/github/tms-brandLab/klf1-study/compose-v1/localData
+  tms_localCode:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: /Users/paul/github/tms-brandLab/klf1-study/compose-v1/localCode
+
+      
+      
+    
