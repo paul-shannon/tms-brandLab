@@ -20,6 +20,7 @@ suppressWarnings(
   suppressMessages({
      library(trena)
      library(ghdb)
+     library(igvR)
      }))
 ```
 Some initializations.  The tersely named "ft" ("feature table") is the data
@@ -208,6 +209,17 @@ These results will be much improved, and tied to specific stages in
 erythropoiesis, by the addition of (among others) single cell data, chromosome 
 conformation, methylation, and proteomics.
 
+### A visualization example: GATA1 binding sites, one from JASPAR, one from HOCOMOCO
+
+```{r igv}
+igv <- igvR()
+setGenome(igv, "hg38")
+showGenomicRegion(igv, "KLF1")
+zoomOut(igv)
+zoomOut(igv)
+track <- DataFrameAnnotationTrack("GATA1", subset(tbl.c, tf=="GATA1"))
+displayTrack(igv, track)
+```
 
 
 

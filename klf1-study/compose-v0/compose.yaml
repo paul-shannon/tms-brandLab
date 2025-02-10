@@ -1,28 +1,26 @@
 services:
   tms:
-    image: "pshannon/tmsft5"
+    image: "pshannon/tms"
     ports:
-      - "8889:8787"
+      - "8888:8787"
       - "15000-15010:15000-15010"
     environment:
        PASSWORD: password
        DISABLE_AUTH: true
     volumes:
-       - tms_data:/home/rstudio/work
+       - tms_data:/home/rstudio/stage
   ghdb:
     image: "pshannon/ghdb"
     environment:
       POSTGRES_PASSWORD: trena
       PGDATA: /var/lib/postgresql/data/pgdata
-
 volumes:
   tms_data:
     driver: local
     driver_opts:
       o: bind
       type: none
-      device: ~/github/tms-brandLab/klf1-study
-      
+      device: /Users/paul/github/TrenaMultiScore/docker/stage
       
       
     

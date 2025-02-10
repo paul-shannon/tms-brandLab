@@ -1,0 +1,8 @@
+FROM pshannon/tmsft4
+COPY config/.bashrc /home/rstudio/
+COPY config/.bashrc /home/rstudio/.profile
+COPY config/.Rprofile /home/rstudio/
+COPY klf1.Rmd /home/rstudio/code/
+RUN whoami
+RUN su - rstudio
+RUN whoami

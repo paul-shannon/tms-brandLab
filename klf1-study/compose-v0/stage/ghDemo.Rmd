@@ -1,0 +1,60 @@
+---
+title: "tms GeneHancer Demo: KLF1 enhancer/promoters"
+output: html_document
+css: style.css
+---
+
+### Overview
+
+The principal goal here is to establish that TrenaMultiScore
+containers, created in Seattle, work easily in Madison for Sirui.
+
+There are two containers at present:
+
+  - an RStudio server with some additional R libraries and this script
+  - a Postgres database with version 5.16 of the GeneHancer data
+
+They are linked together using docker-compose.
+
+The demonstration here has only minor biological interest.  But
+it serves to test our current goal: giving Sirui  extensible code
+she can run.
+```{r loadLibraries, echo=TRUE}
+suppressWarnings(
+   suppressMessages({
+      library(ghdb)
+      library(igvR)
+      library(RPostgres)
+      }))
+```
+Connect to the GeneHancer database, do a simple sanity check
+```{r ghdbConnect, echo=TRUE}
+gh <- DBI::dbConnect(RPostgres::Postgres(),
+                     dbname = "ghdb",
+                     host = "ghdb",
+                     port = 5432,
+                     user = "ghdb",
+                     password="ghdb")
+dbListTables(gh)
+
+```
+With ghdb connectivity established, we now query the database
+for all the enhancers and promoters known, in relevant cell types,
+for KLF1.
+
+First we retrieve all tissues which have genehancer annotations.
+We then select only those in celltype plausibly related to
+erythropoisis, and query the database.
+```{r queryKLF1 echo=TRUE}
+   allTissues <- listTissues(ghdb, "KLF1")
+   tissues <-   c(grep("myeloid", allTissues, ignore.case=TRUE, v=TRUE),
+                  grep("eryth", allTissues, ignore.case=TRUE, v=TRUE),
+                  grep("blood", allTissues, ignore.case=TRUE, v=TRUE))
+   tbl <- retrieveEnhancersFromDatabase(ghdb, "KLF1", tissues)
+   dim(tbl)
+   checkTrue(nrow(tbl) >= 3)
+   View(tbl)
+```
+
+
+
